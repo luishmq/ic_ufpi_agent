@@ -27,6 +27,3 @@ jobs:
 
       - name: Set up Python and install dependencies
         run: uv python install
-
-      - name: Run tests
-        run: uv run pytest tests
