@@ -1,48 +1,115 @@
 import tempfile
 import uuid
 from base64 import b64encode
-
 import requests
 import soundfile as sf
 import speech_recognition as sr
 from google.cloud import storage
-
 from utils.globals import PASSWORD, USERAUDIO
+from utils.result import Result
 
 
-async def transcript_audio(media_url: str, from_number: str) -> str:
-    """Transcreve áudio para texto e armazena os áudios no Cloud Storage."""
-    try:
-        credentials = f'{USERAUDIO}:{PASSWORD}'
-        encoded_credentials = b64encode(credentials.encode()).decode()
-        headers = {'Authorization': f'Basic {encoded_credentials}'}
+class AudioDownloader:
+    """Classe responsável por baixar áudio de uma URL protegida por autenticação."""
 
-        response = requests.get(media_url, headers=headers)
-        response.raise_for_status()
+    @staticmethod
+    async def download_audio(media_url: str) -> Result:
+        """
+        Faz o download do áudio de uma URL protegida.
 
-        with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as ogg_temp_file:
-            ogg_temp_file.write(response.content)
-            ogg_file_path = ogg_temp_file.name
+        Args:
+            media_url (str): URL do arquivo de mídia.
 
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as wav_temp_file:
-            wav_file_path = wav_temp_file.name
+        Returns:
+            Result: Objeto contendo sucesso/falha e o caminho do arquivo baixado.
+        """
+        try:
+            credentials = f'{USERAUDIO}:{PASSWORD}'
+            encoded_credentials = b64encode(credentials.encode()).decode()
+            headers = {'Authorization': f'Basic {encoded_credentials}'}
 
-        storage_client = storage.Client()
-        bucket_name = 'audios_ssp'
-        bucket = storage_client.bucket(bucket_name)
+            response = requests.get(media_url, headers=headers)
+            response.raise_for_status()
 
-        ogg_blob = bucket.blob(f'audios_ogg/{uuid.uuid1()}.ogg')
-        ogg_blob.upload_from_filename(ogg_file_path)
+            with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as temp_file:
+                temp_file.write(response.content)
+                return Result.ok(data=temp_file.name)
+        except requests.RequestException as e:
+            return Result.fail(error_message=f'Erro ao fazer download do áudio: {e}')
 
-        audio_data, sample_rate = sf.read(ogg_file_path)
-        sf.write(wav_file_path, audio_data, sample_rate)
 
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_file_path) as source:
-            audio_text = recognizer.record(source)
-            text = recognizer.recognize_google(audio_text, language='pt-BR')
+class AudioConverter:
+    """Classe responsável pela conversão de formatos de áudio."""
 
-        return text
-    except Exception as e:
-        print(e)
-        return ''
+    @staticmethod
+    async def convert_ogg_to_wav(ogg_path: str) -> Result:
+        """
+        Converte um arquivo OGG para WAV.
+
+        Args:
+            ogg_path (str): Caminho do arquivo OGG.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o caminho do arquivo WAV convertido.
+        """
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as wav_temp_file:
+                wav_path = wav_temp_file.name
+                audio_data, sample_rate = sf.read(ogg_path)
+                sf.write(wav_path, audio_data, sample_rate)
+                return Result.ok(data=wav_path)
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao converter OGG para WAV: {e}')
+
+
+class CloudUploader:
+    """Classe responsável pelo upload de arquivos para o Google Cloud Storage."""
+
+    def __init__(self, bucket_name: str):
+        self.bucket_name = bucket_name
+        self.storage_client = storage.Client()
+
+    async def upload_to_cloud_storage(self, file_path: str, folder: str) -> Result:
+        """
+        Faz o upload de um arquivo para o Google Cloud Storage.
+
+        Args:
+            file_path (str): Caminho do arquivo local.
+            folder (str): Pasta no bucket onde o arquivo será armazenado.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o nome do arquivo armazenado.
+        """
+        try:
+            bucket = self.storage_client.bucket(self.bucket_name)
+            blob = bucket.blob(f'{folder}/{uuid.uuid1()}')
+            blob.upload_from_filename(file_path)
+            return Result.ok(data=blob.name)
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao enviar arquivo para o Cloud Storage: {e}')
+
+
+class AudioTranscriber:
+    """Classe responsável pela transcrição de áudio de arquivos WAV."""
+
+    @staticmethod
+    async def transcribe_audio(wav_path: str) -> Result:
+        """
+        Transcreve áudio de um arquivo WAV.
+
+        Args:
+            wav_path (str): Caminho do arquivo WAV.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o texto transcrito.
+        """
+        try:
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(wav_path) as source:
+                audio_text = recognizer.record(source)
+                text = recognizer.recognize_google(audio_text, language='pt-BR')
+                return Result.ok(data=text)
+        except sr.UnknownValueError:
+            return Result.fail(error_message='Não foi possível reconhecer o áudio.')
+        except sr.RequestError as e:
+            return Result.fail(error_message=f'Erro ao usar o serviço de reconhecimento de fala: {e}')

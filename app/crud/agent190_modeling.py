@@ -1,68 +1,96 @@
 from datetime import date
+from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+from utils.prompts import PROMPT_190
+from utils.result import Result
 
-ai_prompt = """ Você é o Assistente Virtual do serviço de emergência 190 da Delegacia de Polícia do Estado do Piauí. 
 
-Sua responsabilidade é atender emergências que representem ameaça à vida ou risco iminente.
+class SessionManager:
+    """
+    Classe responsável pelo gerenciamento do histórico de sessões.
 
-Você deve seguir as seguintes instruções:
-    - Faça perguntas diretas e objetivas para entender rapidamente a situação.
-    - Colete informações essenciais, como a localização, a natureza da emergência, o número de pessoas envolvidas e a presença de armas ou outros perigos.
-    - Após coletar as informações essenciais, repita-as para o cidadão para garantir que ele saiba que você capturou corretamente os detalhes fornecidos.
-    - Informe ao cidadão que a ocorrência será encaminhada a um oficial superior para avaliação e possível intervenção.
-    
-Você deve estar preparado para reconhecer e responder a códigos ou frases como:
-    - “Quero uma pizza.” - Sinal de que o cidadão está em perigo e precisa de ajuda.
-    - “Está tudo bem?” - Pode ser usada para verificar a segurança do cidadão sem levantar suspeitas.
-    - “Pode me passar a receita?” - Indicando que o cidadão precisa de instruções ou ajuda.
-    - “Qual o preço do aluguel?” - Perguntando informações para obter ajuda sem alertar o criminoso.
-    - “Você tem tempo para falar sobre aquele livro?” - Tentando manter a calma enquanto sinaliza a necessidade de assistência.
-    - “Preciso de um encanador.” - Sinalizando um problema sério que precisa de solução.
-    - “Meu carro quebrou.” - Indicando que o cidadão está em uma situação difícil e precisa de ajuda.
-    - “Quero cancelar minha assinatura.” - Pedindo ajuda sem levantar suspeitas.
+    Attributes:
+        store (dict): Dicionário para armazenar os históricos das sessões.
+    """
 
-Sua conduta deve sempre ser atenciosa e respeitosa com o cidadão.
+    def __init__(self):
+        self.store = {}
 
-Você deve ter compreensão da data atual: {data} para melhor contextualizar e atender o cidadão.
+    def get_session_history(self, session_id: str) -> Result:
+        """
+        Retorna o histórico de uma sessão ou cria uma nova sessão se não existir.
 
-Você deve ter compreensão de todo o histórico da conversa com o cidadão para garantir o fluxo correto de informações.
+        Args:
+            session_id (str): ID da sessão.
 
-Não repita perguntas ou informações que já foram fornecidas pelo cidadão.
+        Returns:
+            Result: Objeto Result contendo sucesso e o histórico da sessão.
+        """
+        if session_id not in self.store:
+            self.store[session_id] = []
+        return Result.ok(data=self.store[session_id])
 
-Se o cidadão utilizar xingamentos ou palavrões, mantenha a calma e tente redirecionar a conversa para um tom mais produtivo.
+    def update_session_history(self, session_id: str, message) -> Result:
+        """
+        Atualiza o histórico da sessão com uma nova mensagem.
 
-"""
+        Args:
+            session_id (str): ID da sessão.
+            message: Mensagem a ser adicionada.
+
+        Returns:
+            Result: Objeto Result indicando sucesso ou erro.
+        """
+        history_result = self.get_session_history(session_id)
+        if not history_result.success:
+            return Result.fail(error_message='Erro ao obter histórico da sessão')
+
+        history = history_result.data
+        history.append(message)
+        return Result.ok()
 
 
 class Agent190:
-    def __init__(self, token):
-        self.llm = ChatOpenAI(temperature=0.2, model='gpt-4o', api_key=token)
-        self.store = {}
+    """
+    Classe para interagir com o modelo de linguagem Anthropic.
 
-    def get_session_history(self, session_id: str):
-        """Cria uma nova sessão se não existir ou retorna o histórico da sessão existente."""
-        if session_id not in self.store:
-            self.store[session_id] = []
-        return self.store[session_id]
+    Attributes:
+        llm: Instância do modelo de linguagem.
+        session_manager (SessionManager): Gerenciador de histórico de sessões.
+    """
 
-    def update_session_history(self, session_id: str, message):
-        """Adiciona uma nova mensagem ao histórico da sessão."""
-        history = self.get_session_history(session_id)
-        history.append(message)
-        self.store[session_id] = history
+    def __init__(self, token: str, session_manager: SessionManager):
+        self.llm = ChatOpenAI(temperature=0.2, model='gpt-4o-mini', api_key=token)
+        self.session_manager = session_manager
 
-    async def generate_text_response(self, input_text, session_id):
-        """Gera uma resposta de texto com Gen AI com base no input do usuário."""
+    async def generate_text_response(self, input_text: str, session_id: str) -> Result:
+        """
+        Gera uma resposta de texto com base no input do usuário.
+
+        Args:
+            input_text (str): Texto de entrada do usuário.
+            session_id (str): ID da sessão.
+
+        Returns:
+            Result: Objeto Result contendo sucesso ou erro e a resposta gerada.
+        """
+        if not input_text or not session_id:
+            return Result.fail(error_message='Input inválido. Tente novamente com um texto válido.')
+
         try:
-            chat_history = self.get_session_history(session_id)
+            history_result = self.session_manager.get_session_history(session_id)
+            if not history_result.success:
+                return Result.fail(error_message='Erro ao obter histórico da sessão')
+
+            chat_history = history_result.data
 
             text_prompt = ChatPromptTemplate.from_messages(
                 [
-                    ('system', ai_prompt),
+                    ('system', PROMPT_190),
                     MessagesPlaceholder(variable_name='chat_history'),
                     ('human', '{input}'),
                 ]
@@ -74,10 +102,19 @@ class Agent190:
 
             response = chain.invoke({'input': input_text, 'chat_history': chat_history, 'data': data_atual})
 
-            self.update_session_history(session_id, HumanMessage(content=input_text))
-            self.update_session_history(session_id, AIMessage(content=response))
+            update_user_result = self.session_manager.update_session_history(
+                session_id, HumanMessage(content=input_text)
+            )
+            if not update_user_result.success:
+                return Result.fail(error_message='Erro ao atualizar histórico com a mensagem do usuário')
 
-            return response
-        except Exception as e:
-            print(f'Erro ao gerar a resposta: {e}')
-            return 'Ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.'
+            update_ai_result = self.session_manager.update_session_history(session_id, AIMessage(content=response))
+            if not update_ai_result.success:
+                return Result.fail(error_message='Erro ao atualizar histórico com a resposta da IA')
+
+            return Result.ok(data=response)
+
+        except Exception:
+            return Result.fail(
+                error_message='Ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.'
+            )

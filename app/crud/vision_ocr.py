@@ -1,17 +1,52 @@
-from google.cloud import vision
 import requests
+from google.cloud import vision
+from utils.result import Result
 
 
-async def perform_ocr(media_url):
-    client = vision.ImageAnnotatorClient()
+class OCRProcessor:
+    """
+    Classe para realizar OCR usando a API Google Cloud Vision.
+    """
 
-    response = requests.get(media_url)
-    content = response.content
+    def __init__(self):
+        self.client = vision.ImageAnnotatorClient()
 
-    image = vision.Image(content=content)
-    response = client.text_detection(image=image)
-    texts = response.text_annotations
+    async def fetch_image(self, media_url: str) -> Result:
+        """
+        Faz o download da imagem a partir de uma URL.
 
-    if texts:
-        return texts[0].description
-    return ''
+        Args:
+            media_url (str): URL do arquivo de mídia.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o conteúdo da imagem em bytes.
+        """
+        try:
+            response = requests.get(media_url)
+            response.raise_for_status()
+            return Result.ok(data=response.content)
+        except requests.RequestException as e:
+            return Result.fail(error_message=f'Erro ao baixar a imagem: {e}')
+
+    async def perform_ocr(self, image_content: bytes) -> Result:
+        """
+        Realiza OCR em uma imagem usando a API Google Cloud Vision.
+
+        Args:
+            image_content (bytes): Conteúdo da imagem em bytes.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o texto extraído da imagem.
+        """
+        try:
+            image = vision.Image(content=image_content)
+            response = self.client.text_detection(image=image)
+            texts = response.text_annotations
+
+            if texts:
+                extracted_text = texts[0].description
+                return Result.ok(data=extracted_text)
+            else:
+                return Result.fail(error_message='Nenhum texto detectado na imagem.')
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao realizar OCR: {e}')
