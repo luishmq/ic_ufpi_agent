@@ -16,7 +16,6 @@ app = FastAPI(
     openapi_url='/api/v1/openapi.json',
     openapi_tags=[
         {'name': 'Healthcheck', 'description': 'Healthcheck Endpoint'},
-        {'name': 'Agent', 'description': 'Agente para Teste'},
         {'name': 'Agent Twilio 190', 'description': 'Agente Twilio para o serviço 190'},
     ],
 )

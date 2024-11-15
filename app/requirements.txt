@@ -10,6 +10,7 @@ soundfile
 google-cloud-bigquery
 google-cloud-storage
 langchain-openai
+langchain-anthropic
 langchain
 google-cloud-vision
 ruff
