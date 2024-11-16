@@ -6,11 +6,11 @@ from crud.agent190_modeling import Agent190, SessionManager
 from crud.audio_transcript import AudioDownloader, AudioConverter, AudioTranscriber, CloudUploader
 from crud.history_bq import BigQueryStorage
 from crud.vision_ocr import OCRProcessor
+from crud.maps import geocode_reverse
 from utils.globals import (
     ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
     OPENAI_API_KEY,
-    ANTHROPIC_API_KEY
 )
 
 router = APIRouter()
@@ -23,7 +23,20 @@ bq_storage = BigQueryStorage()
 
 client = Client(ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
+
 async def process_audio(media_url, msg, resp):
+    """
+    Processa um arquivo de áudio fornecido por uma URL, realizando o download,
+    conversão para formato WAV, upload para o Cloud Storage e transcrição do conteúdo.
+
+    Args:
+        media_url (str): URL do arquivo de áudio.
+        msg: Objeto de mensagem Twilio para manipulação de respostas.
+        resp: Objeto de resposta Twilio.
+
+    Returns:
+        str: Texto transcrito do áudio, ou None em caso de erro.
+    """
     download_result = await AudioDownloader.download_audio(media_url)
     if not download_result.success:
         msg.body(download_result.error_message)
@@ -46,7 +59,20 @@ async def process_audio(media_url, msg, resp):
 
     return transcribe_result.data
 
+
 async def process_image(media_url, msg, resp):
+    """
+    Processa uma imagem fornecida por uma URL, realizando o download,
+    análise OCR e extração de texto.
+
+    Args:
+        media_url (str): URL do arquivo de imagem.
+        msg: Objeto de mensagem Twilio para manipulação de respostas.
+        resp: Objeto de resposta Twilio.
+
+    Returns:
+        str: Texto extraído da imagem, ou None em caso de erro.
+    """
     ocr_result = await ocr_processor.fetch_image(media_url)
     if not ocr_result.success:
         msg.body(ocr_result.error_message)
@@ -59,7 +85,21 @@ async def process_image(media_url, msg, resp):
 
     return ocr_text_result.data
 
+
 async def handle_response(user_input, session_id, msg, resp):
+    """
+    Gera uma resposta baseada no input do usuário, armazena o histórico no BigQuery
+    e retorna a resposta para o usuário.
+
+    Args:
+        user_input (str): Input fornecido pelo usuário (texto, áudio transcrito, ou texto extraído).
+        session_id (str): Identificador único da sessão do usuário.
+        msg: Objeto de mensagem Twilio para manipulação de respostas.
+        resp: Objeto de resposta Twilio.
+
+    Returns:
+        Response: Resposta HTTP em formato XML para o Twilio.
+    """
     agent_result = await agent.generate_text_response(user_input, session_id)
     if not agent_result.success:
         msg.body(agent_result.error_message)
@@ -79,10 +119,11 @@ async def handle_response(user_input, session_id, msg, resp):
     msg.body(agent_result.data)
     return Response(content=str(resp), media_type='application/xml')
 
+
 @router.post('/predict_twilio_190', status_code=status.HTTP_200_OK)
 async def predict_twilio_190(request: Request):
     """
-    Endpoint para processar mensagens de texto ou áudio recebidas via Twilio.
+    Endpoint para processar mensagens de texto, áudio, imagem ou localização recebidas via Twilio.
 
     Args:
         request (Request): Requisição contendo os dados enviados pelo Twilio.
@@ -99,17 +140,33 @@ async def predict_twilio_190(request: Request):
     resp = MessagingResponse()
     msg = resp.message()
 
-    if num_media > 0:
-        media_url = form_data.get('MediaUrl0')
+    latitude = form_data.get('Latitude')
+    longitude = form_data.get('Longitude')
 
-        user_input = await process_audio(media_url, msg, resp)
-        if not user_input:  
+    if latitude and longitude:
+        geocode_result = await geocode_reverse(latitude, longitude)
+        if not geocode_result.success:
+            msg.body(f'Erro ao obter endereço: {geocode_result.error_message}')
             return Response(content=str(resp), media_type='application/xml')
 
-        if user_input is None:
-            user_input = await process_image(media_url, msg, resp)
-            if not user_input:  
+        location_data = f'Localização recebida:\nEndereço: {geocode_result.data}'
+        return await handle_response(location_data, session_id, msg, resp)
+
+    elif num_media > 0:
+        media_url = form_data.get('MediaUrl0')
+        media_content_type = form_data.get('MediaContentType0')
+
+        if 'audio' in media_content_type:
+            user_input = await process_audio(media_url, msg, resp)
+            if not user_input:
                 return Response(content=str(resp), media_type='application/xml')
+        elif 'image' in media_content_type:
+            user_input = await process_image(media_url, msg, resp)
+            if not user_input:
+                return Response(content=str(resp), media_type='application/xml')
+        else:
+            msg.body('Tipo de mídia não suportado.')
+            return Response(content=str(resp), media_type='application/xml')
 
         return await handle_response(user_input, session_id, msg, resp)
 
