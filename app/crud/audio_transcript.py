@@ -5,7 +5,7 @@ import requests
 import soundfile as sf
 import speech_recognition as sr
 from google.cloud import storage
-from utils.globals import PASSWORD, USERAUDIO
+from utils.globals import TWILIO_AUTH_TOKEN, ACCOUNT_SID
 from utils.result import Result
 
 
@@ -24,7 +24,7 @@ class AudioDownloader:
             Result: Objeto contendo sucesso/falha e o caminho do arquivo baixado.
         """
         try:
-            credentials = f'{USERAUDIO}:{PASSWORD}'
+            credentials = f'{ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}'
             encoded_credentials = b64encode(credentials.encode()).decode()
             headers = {'Authorization': f'Basic {encoded_credentials}'}
 

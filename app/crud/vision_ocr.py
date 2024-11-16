@@ -1,6 +1,8 @@
 import requests
+from base64 import b64encode
 from google.cloud import vision
 from utils.result import Result
+from utils.globals import ACCOUNT_SID, TWILIO_AUTH_TOKEN
 
 
 class OCRProcessor:
@@ -22,7 +24,11 @@ class OCRProcessor:
             Result: Objeto contendo sucesso/falha e o conteúdo da imagem em bytes.
         """
         try:
-            response = requests.get(media_url)
+            credentials = f'{ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}'
+            encoded_credentials = b64encode(credentials.encode()).decode()
+            headers = {'Authorization': f'Basic {encoded_credentials}'}
+
+            response = requests.get(media_url, headers=headers)
             response.raise_for_status()
             return Result.ok(data=response.content)
         except requests.RequestException as e:
