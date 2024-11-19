@@ -18,7 +18,7 @@ images: ['${_ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSI
 
 substitutions:
   _ARTIFACT_REGISTRY_LOCATION: us-central1
-  _SERVICE_NAME: api-bot-ssp
-  _REPOSITORY_NAME: api-bot-ssp-repo
+  _SERVICE_NAME: api-bot-ic
+  _REPOSITORY_NAME: api-bot-ic-repo
   _PROJECT_ID: annular-weaver-428312-s3
   _TAG_NAME: latest

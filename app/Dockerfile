@@ -14,7 +14,7 @@ COPY . /app
 
 WORKDIR /app
 
-ENV SERVICE=api-bot-ssp
+ENV SERVICE=api-bot-ic
 ENV PROJECT=annular-weaver-428312-s3
 
 ENV HOST=0.0.0.0
