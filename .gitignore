@@ -10,5 +10,7 @@ wheels/
 # Virtual environments
 .venv
 
+app/.env
+
 .DS_Store
 .python-version

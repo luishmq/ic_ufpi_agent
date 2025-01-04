@@ -11,6 +11,10 @@ google-cloud-bigquery
 google-cloud-storage
 langchain-openai
 langchain-anthropic
+langchain-ollama
+ollama
+langchain-xai
+langchain-google-vertexai
 langchain
 google-cloud-vision
 ruff
