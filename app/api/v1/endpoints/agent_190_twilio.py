@@ -1,22 +1,44 @@
+import os
+
+from dotenv import load_dotenv
 from fastapi import APIRouter, Request, Response, status
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
-from crud.agent190_modeling import Agent190, SessionManager
-from crud.audio_transcript import AudioDownloader, AudioConverter, AudioTranscriber, CloudUploader
-from crud.history_bq import BigQueryStorage
-from crud.vision_ocr import OCRProcessor
-from crud.maps import geocode_reverse
-from utils.globals import (
-    ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    OPENAI_API_KEY,
-)
+from crud.agents.agent190_modeling import Agent190, SessionManager
+from crud.features.audio_transcript import AudioDownloader, AudioConverter, AudioTranscriber, CloudUploader
+from crud.features.history_bq import BigQueryStorage
+from crud.features.vision_ocr import OCRProcessor
+from crud.features.maps import geocode_reverse
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
+from langchain_google_vertexai import ChatVertexAI
+from langchain_anthropic import ChatAnthropic
+from crud.adapters.adapter import LangChainLLMAdapter
+
+
+load_dotenv()
+
+ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
 router = APIRouter()
 
 session_manager = SessionManager()
-agent = Agent190(OPENAI_API_KEY, session_manager)
+
+openai_llm = LangChainLLMAdapter(ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY))
+ollama_llm = LangChainLLMAdapter(ChatOllama(model='llama3.1', temperature=0.2))
+vertexai_llm = LangChainLLMAdapter(ChatVertexAI(model='gemini-1.5-flash-001', temperature=0.2))
+anthropic_llm = LangChainLLMAdapter(
+    ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY)
+)
+# xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2))
+
+agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
+# agent.llm_manager.set_adapter(vertexai_llm)
+
 cloud_uploader = CloudUploader(bucket_name='audios_ssp')
 ocr_processor = OCRProcessor()
 bq_storage = BigQueryStorage()
