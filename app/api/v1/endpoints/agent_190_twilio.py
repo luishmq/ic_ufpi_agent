@@ -36,7 +36,7 @@ anthropic_llm = LangChainLLMAdapter(
 )
 # xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2))
 
-agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
+agent = Agent190(session_manager=session_manager, llm_adapter=ollama_llm)
 # agent.llm_manager.set_adapter(vertexai_llm)
 
 cloud_uploader = CloudUploader(bucket_name='audios_ssp')
