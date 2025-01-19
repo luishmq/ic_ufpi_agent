@@ -20,6 +20,7 @@ dependencies = [
     "ollama>=0.4.5",
     "langchain-google-vertexai>=2.0.9",
     "langchain-xai>=0.1.1",
+    "docker>=7.1.0",
 ]
 
 [tool.ruff]
