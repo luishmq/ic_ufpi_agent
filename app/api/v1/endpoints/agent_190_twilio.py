@@ -1,4 +1,5 @@
 import os
+import time
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Request, Response, status
@@ -19,7 +20,7 @@ from crud.adapters.adapter import LangChainLLMAdapter
 
 load_dotenv()
 
-ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+ACCOUNT_SID = os.getenv('ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
@@ -30,13 +31,13 @@ session_manager = SessionManager()
 
 openai_llm = LangChainLLMAdapter(ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY))
 ollama_llm = LangChainLLMAdapter(ChatOllama(model='llama3.1', temperature=0.2))
-vertexai_llm = LangChainLLMAdapter(ChatVertexAI(model='gemini-1.5-flash-001', temperature=0.2))
+vertexai_llm = LangChainLLMAdapter(ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2))
 anthropic_llm = LangChainLLMAdapter(
     ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY)
 )
 # xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2))
 
-agent = Agent190(session_manager=session_manager, llm_adapter=ollama_llm)
+agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
 # agent.llm_manager.set_adapter(vertexai_llm)
 
 cloud_uploader = CloudUploader(bucket_name='audios_ssp')
@@ -108,40 +109,6 @@ async def process_image(media_url, msg, resp):
     return ocr_text_result.data
 
 
-async def handle_response(user_input, session_id, msg, resp):
-    """
-    Gera uma resposta baseada no input do usuário, armazena o histórico no BigQuery
-    e retorna a resposta para o usuário.
-
-    Args:
-        user_input (str): Input fornecido pelo usuário (texto, áudio transcrito, ou texto extraído).
-        session_id (str): Identificador único da sessão do usuário.
-        msg: Objeto de mensagem Twilio para manipulação de respostas.
-        resp: Objeto de resposta Twilio.
-
-    Returns:
-        Response: Resposta HTTP em formato XML para o Twilio.
-    """
-    agent_result = await agent.generate_text_response(user_input, session_id)
-    if not agent_result.success:
-        msg.body(agent_result.error_message)
-        return Response(content=str(resp), media_type='application/xml')
-
-    bq_result = await bq_storage.store_response(
-        dataset_id='history',
-        table_id='chats',
-        session_id=session_id,
-        user_input=user_input,
-        response=agent_result.data,
-    )
-    if not bq_result.success:
-        msg.body(bq_result.error_message)
-        return Response(content=str(resp), media_type='application/xml')
-
-    msg.body(agent_result.data)
-    return Response(content=str(resp), media_type='application/xml')
-
-
 @router.post('/predict_twilio_190', status_code=status.HTTP_200_OK)
 async def predict_twilio_190(request: Request):
     """
@@ -153,7 +120,6 @@ async def predict_twilio_190(request: Request):
     Returns:
         Response: Resposta em formato XML para Twilio.
     """
-
     form_data = await request.form()
     num_media = int(form_data.get('NumMedia', 0))
     from_number = form_data.get('From')
@@ -172,7 +138,7 @@ async def predict_twilio_190(request: Request):
             return Response(content=str(resp), media_type='application/xml')
 
         location_data = f'Localização recebida:\nEndereço: {geocode_result.data}'
-        return await handle_response(location_data, session_id, msg, resp)
+        user_input = location_data
 
     elif num_media > 0:
         media_url = form_data.get('MediaUrl0')
@@ -189,9 +155,19 @@ async def predict_twilio_190(request: Request):
         else:
             msg.body('Tipo de mídia não suportado.')
             return Response(content=str(resp), media_type='application/xml')
-
-        return await handle_response(user_input, session_id, msg, resp)
-
     else:
-        incoming_msg = form_data.get('Body')
-        return await handle_response(incoming_msg, session_id, msg, resp)
+        user_input = form_data.get('Body')
+
+    agent_result = await agent.generate_text_response(user_input, session_id)
+    if not agent_result.success:
+        msg.body(agent_result.error_message)
+        return Response(content=str(resp), media_type='application/xml')
+
+    request.state.bq_data = {
+        'session_id': session_id,
+        'user_input': user_input,
+        'response': agent_result.data,
+    }
+
+    msg.body(agent_result.data)
+    return Response(content=str(resp), media_type='application/xml')

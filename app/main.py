@@ -8,8 +8,11 @@ from starlette.status import HTTP_504_GATEWAY_TIMEOUT
 
 from api.v1.api import api_router
 from schemas.healthcheck import HealthCheck
+from crud.features.history_bq import BigQueryStorage
 
 REQUEST_TIMEOUT_ERROR = 300
+
+bq_storage = BigQueryStorage()
 
 app = FastAPI(
     title='API ChatBot Gen AI - SSP',
@@ -22,17 +25,35 @@ app = FastAPI(
 
 
 @app.middleware('http')
-async def timeout_middleware(request: Request, call_next):
+async def process_time_and_timeout_middleware(request: Request, call_next):
+    start_time = time.time()
+    request.state.response_time = None
     try:
-        start_time = time.time()
         response = await asyncio.wait_for(call_next(request), timeout=REQUEST_TIMEOUT_ERROR)
-        return response
     except asyncio.TimeoutError:
         process_time = time.time() - start_time
         return JSONResponse(
-            {'detail': f'Request processing time exceeded limit ({process_time})'},
+            {'detail': f'Request processing time exceeded limit ({process_time:.3f} seconds)'},
             status_code=HTTP_504_GATEWAY_TIMEOUT,
         )
+    process_time = time.time() - start_time
+
+    print(f'Tempo de resposta: {process_time:.3f} segundos')
+
+    if hasattr(request.state, 'bq_data'):
+        bq_data = request.state.bq_data  
+        bq_data['response_time'] = process_time
+
+        await bq_storage.store_response(
+            dataset_id='history',
+            table_id='chats',
+            session_id=bq_data['session_id'],
+            user_input=bq_data['user_input'],
+            response=bq_data['response'],
+            response_time=bq_data['response_time']
+        )
+
+    return response
 
 
 app.add_middleware(
