@@ -12,7 +12,7 @@ from utils.result import Result
 
 load_dotenv()
 
-ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+ACCOUNT_SID = os.getenv('ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 
 

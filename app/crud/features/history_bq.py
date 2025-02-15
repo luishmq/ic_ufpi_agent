@@ -12,7 +12,7 @@ class BigQueryStorage:
         self.client = bigquery.Client()
 
     async def store_response(
-        self, dataset_id: str, table_id: str, session_id: str, user_input: str, response: str
+        self, dataset_id: str, table_id: str, session_id: str, user_input: str, response: str, response_time: float
     ) -> Result:
         """
         Salva a resposta do agente no BigQuery.
@@ -23,6 +23,7 @@ class BigQueryStorage:
             session_id (str): ID da sessão do usuário.
             user_input (str): Texto de entrada fornecido pelo usuário.
             response (str): Resposta gerada pelo agente.
+            response_time (float): Tempo de resposta medido.
 
         Returns:
             Result: Objeto Result contendo sucesso ou erro.
@@ -39,6 +40,7 @@ class BigQueryStorage:
                     'input': user_input,
                     'timestamp': datetime.utcnow().isoformat(),
                     'response': response,
+                    'response_time': response_time,
                 }
             ]
 
