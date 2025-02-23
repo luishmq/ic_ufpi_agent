@@ -1,6 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import MessagesPlaceholder
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from utils.result import Result
 
 
@@ -9,14 +9,16 @@ class LangChainLLMAdapter:
     Adaptador genérico para modelos compatíveis com LangChain (OpenAI, Ollama, VertexAI, etc.).
     """
 
-    def __init__(self, llm):
+    def __init__(self, llm, tools):
         """
-        Inicializa o adaptador com uma instância do modelo LangChain.
+        Inicializa o adaptador com uma instância do modelo LangChain e um conjunto de ferramentas.
 
         Args:
             llm: Instância do modelo LangChain (ex.: ChatOpenAI, ChatOllama).
+            tools: Instância de Tools (ou similar) que contenha as ferramentas necessárias.
         """
         self.llm = llm
+        self.tools = tools
 
     def generate_response(self, input_text: str, chat_history: list, context: dict) -> Result:
         """
@@ -36,14 +38,18 @@ class LangChainLLMAdapter:
                     ('system', context.get('system_prompt', '')),
                     MessagesPlaceholder(variable_name='chat_history'),
                     ('human', '{input}'),
+                    MessagesPlaceholder(variable_name='agent_scratchpad'),
                 ]
             )
 
-            parser = StrOutputParser()
-            chain = prompt | self.llm | parser
+            agent = create_tool_calling_agent(llm=self.llm, tools=[self.tools.get_person_data_tool], prompt=prompt)
 
-            response = chain.invoke({'input': input_text, 'chat_history': chat_history, 'data': context.get('date')})
+            agent_executor = AgentExecutor(agent=agent, tools=[self.tools.get_person_data_tool], verbose=True)
 
-            return Result.ok(data=response)
+            response = agent_executor.invoke(
+                {'input': input_text, 'chat_history': chat_history, 'data': context.get('date')}
+            )
+
+            return Result.ok(data=response['output'][0]['text'])
         except Exception as e:
             return Result.fail(error_message=f'Erro ao gerar resposta: {str(e)}')

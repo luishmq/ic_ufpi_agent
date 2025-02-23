@@ -1,5 +1,4 @@
 import os
-import time
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Request, Response, status
@@ -15,8 +14,9 @@ from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langchain_google_vertexai import ChatVertexAI
 from langchain_anthropic import ChatAnthropic
-from crud.adapters.adapter import LangChainLLMAdapter
 
+from crud.adapters.adapter import LangChainLLMAdapter
+from crud.tools.tools import Tools
 
 load_dotenv()
 
@@ -29,13 +29,20 @@ router = APIRouter()
 
 session_manager = SessionManager()
 
-openai_llm = LangChainLLMAdapter(ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY))
-ollama_llm = LangChainLLMAdapter(ChatOllama(model='llama3.1', temperature=0.2))
-vertexai_llm = LangChainLLMAdapter(ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2))
-anthropic_llm = LangChainLLMAdapter(
-    ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY)
+tools_instance = Tools()
+
+openai_llm = LangChainLLMAdapter(
+    llm=ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY), tools=tools_instance
 )
-# xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2))
+ollama_llm = LangChainLLMAdapter(llm=ChatOllama(model='llama3.1', temperature=0.2), tools=tools_instance)
+vertexai_llm = LangChainLLMAdapter(
+    llm=ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2), tools=tools_instance
+)
+anthropic_llm = LangChainLLMAdapter(
+    llm=ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY),
+    tools=tools_instance,
+)
+# xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2), tools=tools_instance)
 
 agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
 # agent.llm_manager.set_adapter(vertexai_llm)
@@ -51,14 +58,6 @@ async def process_audio(media_url, msg, resp):
     """
     Processa um arquivo de áudio fornecido por uma URL, realizando o download,
     conversão para formato WAV, upload para o Cloud Storage e transcrição do conteúdo.
-
-    Args:
-        media_url (str): URL do arquivo de áudio.
-        msg: Objeto de mensagem Twilio para manipulação de respostas.
-        resp: Objeto de resposta Twilio.
-
-    Returns:
-        str: Texto transcrito do áudio, ou None em caso de erro.
     """
     download_result = await AudioDownloader.download_audio(media_url)
     if not download_result.success:
@@ -87,14 +86,6 @@ async def process_image(media_url, msg, resp):
     """
     Processa uma imagem fornecida por uma URL, realizando o download,
     análise OCR e extração de texto.
-
-    Args:
-        media_url (str): URL do arquivo de imagem.
-        msg: Objeto de mensagem Twilio para manipulação de respostas.
-        resp: Objeto de resposta Twilio.
-
-    Returns:
-        str: Texto extraído da imagem, ou None em caso de erro.
     """
     ocr_result = await ocr_processor.fetch_image(media_url)
     if not ocr_result.success:
@@ -113,12 +104,6 @@ async def process_image(media_url, msg, resp):
 async def predict_twilio_190(request: Request):
     """
     Endpoint para processar mensagens de texto, áudio, imagem ou localização recebidas via Twilio.
-
-    Args:
-        request (Request): Requisição contendo os dados enviados pelo Twilio.
-
-    Returns:
-        Response: Resposta em formato XML para Twilio.
     """
     form_data = await request.form()
     num_media = int(form_data.get('NumMedia', 0))
