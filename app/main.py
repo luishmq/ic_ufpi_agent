@@ -27,7 +27,6 @@ app = FastAPI(
 @app.middleware('http')
 async def process_time_and_timeout_middleware(request: Request, call_next):
     start_time = time.time()
-    request.state.response_time = None
     try:
         response = await asyncio.wait_for(call_next(request), timeout=REQUEST_TIMEOUT_ERROR)
     except asyncio.TimeoutError:
