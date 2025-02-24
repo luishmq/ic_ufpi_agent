@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 
 from dotenv import load_dotenv
@@ -14,9 +15,14 @@ BASE_URL = os.getenv('BASE_URL')
 def get_person_data(cpf: str):
     """Retorna os dados do cidadão a partir do CPF fornecido."""
     try:
+        cpf_clean = re.sub(r'\D', '', cpf)
+
+        if len(cpf_clean) != 11:
+            return 'CPF inválido. Verifique se digitou corretamente.'
+
         response = requests.get(
             f'{BASE_URL}/ibioseg/pessoa',
-            params={'cpf': cpf},
+            params={'cpf': cpf_clean},
             headers={'Authorization': f'Api-Key {LUPA_API_KEY}'},
             verify=False,
         )
