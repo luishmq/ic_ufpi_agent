@@ -83,8 +83,7 @@ async def process_audio(media_url, msg, resp):
 
 async def process_image(media_url, msg, resp):
     """
-    Processa uma imagem fornecida por uma URL, realizando o download,
-    análise OCR e extração de texto.
+    Processa uma imagem fornecida por uma URL, realizando o download, interpretação com Gemini e retorno do resultado.
     """
     img_result = await gemini_vision.fetch_image(media_url)
     if not img_result.success:

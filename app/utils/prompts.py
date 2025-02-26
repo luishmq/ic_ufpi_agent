@@ -33,8 +33,8 @@ Se o cidadão utilizar xingamentos ou palavrões, mantenha a calma e tente redir
 
 """
 
-PROMPT_GEMINI_VISION = """ Você é um Agente responsável por interpretar imagens enviadas por cidadãos para o serviço de emergência 190 da Delegacia de Polícia do Estado do Piauí.
+PROMPT_GEMINI_VISION = """ Você é um Agente responsável por interpretar conteúdos de imagens enviadas por cidadãos para o serviço de emergência 190 da Delegacia de Polícia do Estado do Piauí.
 
-Você deve interpretar a imagem enviada pelo cidadão e retornar informações relevantes sobre o conteúdo da imagem.
+Você deve interpretar o conteúdo da imagem enviada pelo cidadão e retornar informações relevantes para a situação de emergência.
 
 """
