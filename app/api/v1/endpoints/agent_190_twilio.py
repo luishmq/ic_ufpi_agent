@@ -8,11 +8,10 @@ from twilio.twiml.messaging_response import MessagingResponse
 from crud.agents.agent190_modeling import Agent190, SessionManager
 from crud.features.audio_transcript import AudioDownloader, AudioConverter, AudioTranscriber, CloudUploader
 from crud.features.history_bq import BigQueryStorage
-from crud.features.vision_ocr import OCRProcessor
+from crud.features.gemini_vision import GeminiVision
 from crud.features.maps import geocode_reverse
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
-from langchain_google_vertexai import ChatVertexAI
 from langchain_anthropic import ChatAnthropic
 
 from crud.adapters.adapter import LangChainLLMAdapter
@@ -35,9 +34,9 @@ openai_llm = LangChainLLMAdapter(
     llm=ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY), tools=tools_instance
 )
 ollama_llm = LangChainLLMAdapter(llm=ChatOllama(model='llama3.1', temperature=0.2), tools=tools_instance)
-vertexai_llm = LangChainLLMAdapter(
-    llm=ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2), tools=tools_instance
-)
+# vertexai_llm = LangChainLLMAdapter(
+#     llm=ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2), tools=tools_instance
+# )
 anthropic_llm = LangChainLLMAdapter(
     llm=ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY),
     tools=tools_instance,
@@ -48,7 +47,7 @@ agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
 # agent.llm_manager.set_adapter(vertexai_llm)
 
 cloud_uploader = CloudUploader(bucket_name='audios_ssp')
-ocr_processor = OCRProcessor()
+gemini_vision = GeminiVision()
 bq_storage = BigQueryStorage()
 
 client = Client(ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -87,17 +86,17 @@ async def process_image(media_url, msg, resp):
     Processa uma imagem fornecida por uma URL, realizando o download,
     análise OCR e extração de texto.
     """
-    ocr_result = await ocr_processor.fetch_image(media_url)
-    if not ocr_result.success:
-        msg.body(ocr_result.error_message)
+    img_result = await gemini_vision.fetch_image(media_url)
+    if not img_result.success:
+        msg.body(img_result.error_message)
         return None
 
-    ocr_text_result = await ocr_processor.perform_ocr(ocr_result.data)
-    if not ocr_text_result.success:
-        msg.body(ocr_text_result.error_message)
+    gemini_result = await gemini_vision.perform_gemini(img_result.data)
+    if not gemini_result.success:
+        msg.body(gemini_result.error_message)
         return None
 
-    return ocr_text_result.data
+    return gemini_result.data
 
 
 @router.post('/predict_twilio_190', status_code=status.HTTP_200_OK)
