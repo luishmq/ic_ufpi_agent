@@ -37,8 +37,6 @@ async def process_time_and_timeout_middleware(request: Request, call_next):
         )
     process_time = time.time() - start_time
 
-    print(f'Tempo de resposta: {process_time:.3f} segundos')
-
     if hasattr(request.state, 'bq_data'):
         bq_data = request.state.bq_data
         bq_data['response_time'] = process_time
@@ -50,6 +48,7 @@ async def process_time_and_timeout_middleware(request: Request, call_next):
             user_input=bq_data['user_input'],
             response=bq_data['response'],
             response_time=bq_data['response_time'],
+            message_type=bq_data.get('message_type', 'text'),
         )
 
     return response

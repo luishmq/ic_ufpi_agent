@@ -12,6 +12,7 @@ google-cloud-storage
 langchain-openai
 langchain-anthropic
 langchain-ollama
+langchain-deepseek
 ollama
 langchain-xai
 langchain-google-vertexai
