@@ -118,3 +118,40 @@ class GeminiVision:
 
         except Exception as e:
             return Result.fail(error_message=f'Erro ao interpretar a imagem com Gemini: {e}')
+
+    async def perform_gemini_local(self, image_path: str) -> Result:
+        """
+        Interpreta uma imagem local usando o modelo Gemini do Vertex AI.
+
+        Args:
+            image_path (str): Caminho para o arquivo de imagem local.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e o texto extraído da imagem.
+        """
+        try:
+            self._init_gemini_once()
+
+            if image_path.lower().endswith('.jpg') or image_path.lower().endswith('.jpeg'):
+                mime_type = 'image/jpeg'
+            elif image_path.lower().endswith('.png'):
+                mime_type = 'image/png'
+            else:
+                mime_type = 'image/jpeg'
+
+            with open(image_path, 'rb') as f:
+                image_content = f.read()
+
+            image_part = Part.from_data(mime_type=mime_type, data=image_content)
+
+            response = self._gemini_model.generate_content(
+                [image_part, PROMPT_GEMINI_VISION],
+                generation_config=self._generation_config,
+                safety_settings=self._safety_settings,
+                stream=False,
+            )
+
+            return Result.ok(data=response.text)
+
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao interpretar a imagem local com Gemini: {e}')
