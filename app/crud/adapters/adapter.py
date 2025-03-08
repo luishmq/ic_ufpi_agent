@@ -1,6 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts import MessagesPlaceholder
 from langchain.agents import AgentExecutor, create_tool_calling_agent
+# from langchain_openai import ChatOpenAI
+# from langchain_ollama import ChatOllama
+# from langchain_anthropic import ChatAnthropic
+# from langchain_google_vertexai import ChatVertexAI
+from langchain_deepseek import ChatDeepSeek
 from utils.result import Result
 
 
@@ -49,6 +54,9 @@ class LangChainLLMAdapter:
             response = agent_executor.invoke(
                 {'input': input_text, 'chat_history': chat_history, 'data': context.get('date')}
             )
+
+            if isinstance(self.llm, ChatDeepSeek):
+                return Result.ok(data=response['output'])
 
             return Result.ok(data=response['output'][0]['text'])
         except Exception as e:

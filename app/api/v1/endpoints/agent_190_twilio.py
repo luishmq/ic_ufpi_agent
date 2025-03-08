@@ -10,11 +10,7 @@ from crud.features.audio_transcript import AudioDownloader, AudioConverter, Audi
 from crud.features.history_bq import BigQueryStorage
 from crud.features.gemini_vision import GeminiVision
 from crud.features.maps import geocode_reverse
-from langchain_openai import ChatOpenAI
-from langchain_ollama import ChatOllama
-from langchain_anthropic import ChatAnthropic
-
-from crud.adapters.adapter import LangChainLLMAdapter
+from crud.managers.llm_manager import LLMManager
 from crud.tools.tools import Tools
 
 load_dotenv()
@@ -23,28 +19,25 @@ ACCOUNT_SID = os.getenv('ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 
 router = APIRouter()
 
 session_manager = SessionManager()
-
 tools_instance = Tools()
 
-openai_llm = LangChainLLMAdapter(
-    llm=ChatOpenAI(model='gpt-4o-mini', temperature=0.2, api_key=OPENAI_API_KEY), tools=tools_instance
+llm_manager = LLMManager()
+factory_result = llm_manager.create_adapter(
+    model_type='deepseek', tools=tools_instance, api_key=DEEPSEEK_API_KEY, model_name='deepseek-chat', temperature=0.5
 )
-ollama_llm = LangChainLLMAdapter(llm=ChatOllama(model='llama3.1', temperature=0.2), tools=tools_instance)
-# vertexai_llm = LangChainLLMAdapter(
-#     llm=ChatVertexAI(model='gemini-1.5-flash-002', temperature=0.2), tools=tools_instance
-# )
-anthropic_llm = LangChainLLMAdapter(
-    llm=ChatAnthropic(model='claude-3-5-haiku-20241022', temperature=0.2, api_key=ANTHROPIC_API_KEY),
-    tools=tools_instance,
-)
-# xai_llm = LangChainLLMAdapter(ChatXAI(model='grok-beta', temperature=0.2), tools=tools_instance)
 
-agent = Agent190(session_manager=session_manager, llm_adapter=anthropic_llm)
-# agent.llm_manager.set_adapter(vertexai_llm)
+if not factory_result.success:
+    raise Exception(f'Erro ao criar adaptador LLM: {factory_result.error_message}')
+
+agent = Agent190(session_manager=session_manager, llm_adapter=factory_result.data)
+
+# llm_manager.create_adapter('openai', tools_instance, api_key=OPENAI_API_KEY, model_name='gpt-4o-mini')
+# agent.llm_manager.set_adapter(llm_manager.llm_adapter)
 
 cloud_uploader = CloudUploader(bucket_name='audios_ssp')
 gemini_vision = GeminiVision()
@@ -146,10 +139,22 @@ async def predict_twilio_190(request: Request):
         msg.body(agent_result.error_message)
         return Response(content=str(resp), media_type='application/xml')
 
+    message_type = 'text'
+
+    if latitude and longitude:
+        message_type = 'location'
+    elif num_media > 0:
+        media_content_type = form_data.get('MediaContentType0', '')
+        if 'audio' in media_content_type:
+            message_type = 'audio'
+        elif 'image' in media_content_type:
+            message_type = 'image'
+
     request.state.bq_data = {
         'session_id': session_id,
         'user_input': user_input,
         'response': agent_result.data,
+        'message_type': message_type,
     }
 
     msg.body(agent_result.data)
