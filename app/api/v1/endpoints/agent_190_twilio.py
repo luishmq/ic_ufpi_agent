@@ -28,7 +28,11 @@ tools_instance = Tools()
 
 llm_manager = LLMManager()
 factory_result = llm_manager.create_adapter(
-    model_type='deepseek', tools=tools_instance, api_key=DEEPSEEK_API_KEY, model_name='deepseek-chat', temperature=0.5
+    model_type='anthropic',
+    tools=tools_instance,
+    api_key=ANTHROPIC_API_KEY,
+    model_name='claude-3-5-haiku-20241022',
+    temperature=0.5,
 )
 
 if not factory_result.success:
