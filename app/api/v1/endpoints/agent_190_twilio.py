@@ -1,104 +1,122 @@
-import os
+import asyncio
+import logging
+from typing import Optional
 
-from dotenv import load_dotenv
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Request, Response, status, Depends
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
-from crud.agents.agent190_modeling import Agent190, SessionManager
-from crud.features.audio_transcript import AudioDownloader, AudioConverter, AudioTranscriber, CloudUploader
-from crud.features.history_bq import BigQueryStorage
+from crud.agents.agent190_modeling import Agent190
+from crud.features.audio_transcript import (
+    AudioDownloader,
+    AudioConverter,
+    AudioTranscriber,
+    CloudUploader,
+)
 from crud.features.gemini_vision import GeminiVision
 from crud.features.maps import geocode_reverse
-from crud.managers.llm_manager import LLMManager
-from crud.tools.tools import Tools
 
-load_dotenv()
-
-ACCOUNT_SID = os.getenv('ACCOUNT_SID')
-TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+from api.v1.dependencies import (
+    get_twilio_client,
+    get_agent,
+    get_gemini_vision,
+    get_cloud_uploader,
+    settings,
+)
 
 router = APIRouter()
 
-session_manager = SessionManager()
-tools_instance = Tools()
 
-llm_manager = LLMManager()
-factory_result = llm_manager.create_adapter(
-    model_type='anthropic',
-    tools=tools_instance,
-    api_key=ANTHROPIC_API_KEY,
-    model_name='claude-3-5-haiku-20241022',
-    temperature=0.5,
-)
-
-if not factory_result.success:
-    raise Exception(f'Erro ao criar adaptador LLM: {factory_result.error_message}')
-
-agent = Agent190(session_manager=session_manager, llm_adapter=factory_result.data)
-
-# llm_manager.create_adapter('openai', tools_instance, api_key=OPENAI_API_KEY, model_name='gpt-4o-mini')
-# agent.llm_manager.set_adapter(llm_manager.llm_adapter)
-
-cloud_uploader = CloudUploader(bucket_name='audios_ssp')
-gemini_vision = GeminiVision()
-bq_storage = BigQueryStorage()
-
-client = Client(ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-
-async def process_audio(media_url, msg, resp):
+async def send_twilio_message(to_number: str, body_text: str, client: Client = Depends(get_twilio_client)):
     """
-    Processa um arquivo de áudio fornecido por uma URL, realizando o download,
-    conversão para formato WAV, upload para o Cloud Storage e transcrição do conteúdo.
+    Envia mensagem para o usuário via Twilio API (outbound).
+
+    Args:
+        to_number (str): Número do destinatário no formato 'whatsapp:+55...'
+        body_text (str): Texto da mensagem a ser enviada.
+        client (Client): Cliente Twilio para envio da mensagem.
     """
-    download_result = await AudioDownloader.download_audio(media_url)
-    if not download_result.success:
-        msg.body(download_result.error_message)
-        return None
-
-    convert_result = await AudioConverter.convert_ogg_to_wav(download_result.data)
-    if not convert_result.success:
-        msg.body(convert_result.error_message)
-        return None
-
-    upload_result = await cloud_uploader.upload_to_cloud_storage(convert_result.data, folder='audios_wav')
-    if not upload_result.success:
-        msg.body(upload_result.error_message)
-        return None
-
-    transcribe_result = await AudioTranscriber.transcribe_audio(convert_result.data)
-    if not transcribe_result.success:
-        msg.body(transcribe_result.error_message)
-        return None
-
-    return transcribe_result.data
+    try:
+        client.messages.create(body=body_text, from_=settings.twilio_whatsapp_number, to=to_number)
+    except Exception as e:
+        logging.exception(f'Falha ao enviar mensagem Twilio: {e}')
 
 
-async def process_image(media_url, msg, resp):
+async def process_audio_in_background(
+    ogg_path: str, from_number: str, session_id: str, send_message_func, agent: Agent190, cloud_uploader: CloudUploader
+):
     """
-    Processa uma imagem fornecida por uma URL, realizando o download, interpretação com Gemini e retorno do resultado.
+    Processa o áudio de forma assíncrona.
+
+    Args:
+        ogg_path (str): Caminho para o arquivo de áudio OGG baixado.
+        from_number (str): Número do remetente no formato Twilio.
+        session_id (str): ID da sessão para manter contexto da conversa.
+        send_message_func: Função para enviar mensagens de resposta.
+        agent (Agent190): Instância do agente para processar o texto transcrito.
+        cloud_uploader (CloudUploader): Uploader para armazenar o arquivo na nuvem.
     """
-    img_result = await gemini_vision.fetch_image(media_url)
-    if not img_result.success:
-        msg.body(img_result.error_message)
-        return None
+    try:
+        convert_result = await AudioConverter.convert_ogg_to_wav(ogg_path)
+        if not convert_result.success:
+            await send_message_func(from_number, convert_result.error_message)
+            return
 
-    gemini_result = await gemini_vision.perform_gemini(img_result.data)
-    if not gemini_result.success:
-        msg.body(gemini_result.error_message)
-        return None
+        wav_path = convert_result.data
 
-    return gemini_result.data
+        upload_result = await cloud_uploader.upload_to_cloud_storage(wav_path, folder='audios_wav')
+        if not upload_result.success:
+            await send_message_func(from_number, upload_result.error_message)
+            return
+
+        transcribe_result = await AudioTranscriber.transcribe_audio(wav_path)
+        if not transcribe_result.success:
+            await send_message_func(from_number, transcribe_result.error_message)
+            return
+
+        user_input = transcribe_result.data
+
+        agent_result = await agent.generate_text_response(user_input, session_id)
+        if not agent_result.success:
+            await send_message_func(from_number, agent_result.error_message)
+            return
+
+        final_text = agent_result.data
+
+        await send_message_func(from_number, final_text)
+
+    except Exception as e:
+        logging.exception(f'Erro ao processar áudio: {e}')
+        await send_message_func(from_number, f'Erro ao processar áudio: {str(e)}')
 
 
 @router.post('/predict_twilio_190', status_code=status.HTTP_200_OK)
-async def predict_twilio_190(request: Request):
+async def predict_twilio_190(
+    request: Request,
+    response: Response,
+    twilio_client: Client = Depends(get_twilio_client),
+    agent: Agent190 = Depends(get_agent),
+    gemini_vision: GeminiVision = Depends(get_gemini_vision),
+    cloud_uploader: CloudUploader = Depends(get_cloud_uploader),
+):
     """
-    Endpoint para processar mensagens de texto, áudio, imagem ou localização recebidas via Twilio.
+    Endpoint que recebe e processa mensagens do WhatsApp via Twilio.
+
+    Args:
+        request (Request): Objeto de requisição FastAPI.
+        response (Response): Objeto de resposta FastAPI.
+        twilio_client (Client): Cliente da API Twilio.
+        agent (Agent190): Instância do agente de atendimento.
+        gemini_vision (GeminiVision): Serviço de visão computacional.
+        cloud_uploader (CloudUploader): Serviço de upload para nuvem.
+
+    Returns:
+        Response: Resposta TwiML formatada para o Twilio.
+
+    Note:
+        Suporta mensagens de texto, imagem, localização e áudio.
+        Áudio é processado de forma assíncrona.
+        Define `request.state.bq_data` para registrar no BigQuery via middleware.
     """
     form_data = await request.form()
     num_media = int(form_data.get('NumMedia', 0))
@@ -110,56 +128,166 @@ async def predict_twilio_190(request: Request):
 
     latitude = form_data.get('Latitude')
     longitude = form_data.get('Longitude')
-
-    if latitude and longitude:
-        geocode_result = await geocode_reverse(latitude, longitude)
-        if not geocode_result.success:
-            msg.body(f'Erro ao obter endereço: {geocode_result.error_message}')
-            return Response(content=str(resp), media_type='application/xml')
-
-        location_data = f'Localização recebida:\nEndereço: {geocode_result.data}'
-        user_input = location_data
-
-    elif num_media > 0:
-        media_url = form_data.get('MediaUrl0')
-        media_content_type = form_data.get('MediaContentType0')
-
-        if 'audio' in media_content_type:
-            user_input = await process_audio(media_url, msg, resp)
-            if not user_input:
-                return Response(content=str(resp), media_type='application/xml')
-        elif 'image' in media_content_type:
-            user_input = await process_image(media_url, msg, resp)
-            if not user_input:
-                return Response(content=str(resp), media_type='application/xml')
-        else:
-            msg.body('Tipo de mídia não suportado.')
-            return Response(content=str(resp), media_type='application/xml')
-    else:
-        user_input = form_data.get('Body')
-
-    agent_result = await agent.generate_text_response(user_input, session_id)
-    if not agent_result.success:
-        msg.body(agent_result.error_message)
-        return Response(content=str(resp), media_type='application/xml')
-
+    user_input: Optional[str] = None
+    agent_response: Optional[str] = None
     message_type = 'text'
 
     if latitude and longitude:
         message_type = 'location'
+        geocode_result = await geocode_reverse(latitude, longitude)
+        if not geocode_result.success:
+            error = f'Erro ao obter endereço: {geocode_result.error_message}'
+            msg.body(error)
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': f'Lat:{latitude}, Lng:{longitude}',
+                'response': error,
+                'message_type': message_type,
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
+        user_input = f'Localização recebida:\nEndereço: {geocode_result.data}'
+        agent_result = await agent.generate_text_response(user_input, session_id)
+        if not agent_result.success:
+            error = agent_result.error_message
+            msg.body(error)
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': user_input,
+                'response': error,
+                'message_type': message_type,
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
+        agent_response = agent_result.data
+        msg.body(agent_response)
+
+        request.state.bq_data = {
+            'session_id': session_id,
+            'user_input': user_input,
+            'response': agent_response,
+            'message_type': message_type,
+        }
+        return Response(content=str(resp), media_type='application/xml')
+
     elif num_media > 0:
-        media_content_type = form_data.get('MediaContentType0', '')
+        media_url = form_data.get('MediaUrl0')
+        media_content_type = form_data.get('MediaContentType0', '').lower()
+
         if 'audio' in media_content_type:
             message_type = 'audio'
+            download_result = await AudioDownloader.download_audio(media_url)
+            if not download_result.success:
+                msg.body(download_result.error_message)
+                request.state.bq_data = {
+                    'session_id': session_id,
+                    'user_input': 'Audio inbound - download error',
+                    'response': download_result.error_message,
+                    'message_type': message_type,
+                }
+                return Response(content=str(resp), media_type='application/xml')
+
+            asyncio.create_task(
+                process_audio_in_background(
+                    ogg_path=download_result.data,
+                    from_number=from_number,
+                    session_id=session_id,
+                    send_message_func=lambda to, text: send_twilio_message(to, text, twilio_client),
+                    agent=agent,
+                    cloud_uploader=cloud_uploader,
+                )
+            )
+
+            user_input = 'Audio being processed offline'
+            agent_response = 'N/A (will be generated async)'
+            msg.body('')
+
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': user_input,
+                'response': agent_response,
+                'message_type': message_type,
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
         elif 'image' in media_content_type:
             message_type = 'image'
+            img_result = await gemini_vision.fetch_image(media_url)
+            if not img_result.success:
+                msg.body(img_result.error_message)
+                request.state.bq_data = {
+                    'session_id': session_id,
+                    'user_input': 'Image inbound - fetch error',
+                    'response': img_result.error_message,
+                    'message_type': message_type,
+                }
+                return Response(content=str(resp), media_type='application/xml')
 
-    request.state.bq_data = {
-        'session_id': session_id,
-        'user_input': user_input,
-        'response': agent_result.data,
-        'message_type': message_type,
-    }
+            gemini_result = await gemini_vision.perform_gemini(img_result.data)
+            if not gemini_result.success:
+                msg.body(gemini_result.error_message)
+                request.state.bq_data = {
+                    'session_id': session_id,
+                    'user_input': 'Image inbound - gemini error',
+                    'response': gemini_result.error_message,
+                    'message_type': message_type,
+                }
+                return Response(content=str(resp), media_type='application/xml')
 
-    msg.body(agent_result.data)
-    return Response(content=str(resp), media_type='application/xml')
+            user_input = gemini_result.data
+            agent_result = await agent.generate_text_response(user_input, session_id)
+            if not agent_result.success:
+                msg.body(agent_result.error_message)
+                request.state.bq_data = {
+                    'session_id': session_id,
+                    'user_input': user_input,
+                    'response': agent_result.error_message,
+                    'message_type': message_type,
+                }
+                return Response(content=str(resp), media_type='application/xml')
+
+            agent_response = agent_result.data
+            msg.body(agent_response)
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': user_input,
+                'response': agent_response,
+                'message_type': message_type,
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
+        else:
+            error = 'Tipo de mídia não suportado.'
+            msg.body(error)
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': 'Media inbound - not supported',
+                'response': error,
+                'message_type': 'unsupported',
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
+    else:
+        message_type = 'text'
+        user_input = form_data.get('Body', '')
+        agent_result = await agent.generate_text_response(user_input, session_id)
+        if not agent_result.success:
+            error = agent_result.error_message
+            msg.body(error)
+            request.state.bq_data = {
+                'session_id': session_id,
+                'user_input': user_input,
+                'response': error,
+                'message_type': message_type,
+            }
+            return Response(content=str(resp), media_type='application/xml')
+
+        agent_response = agent_result.data
+        msg.body(agent_response)
+        request.state.bq_data = {
+            'session_id': session_id,
+            'user_input': user_input,
+            'response': agent_response,
+            'message_type': message_type,
+        }
+        return Response(content=str(resp), media_type='application/xml')
