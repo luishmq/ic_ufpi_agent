@@ -53,10 +53,27 @@ class SessionManager:
 
 class Agent190:
     def __init__(self, session_manager: SessionManager, llm_adapter: LangChainLLMAdapter):
+        """
+        Inicializa uma instância do agente de atendimento 190.
+
+        Args:
+            session_manager (SessionManager): Gerenciador para manter o histórico das sessões.
+            llm_adapter (LangChainLLMAdapter): Adaptador para o modelo de linguagem.
+        """
         self.session_manager = session_manager
         self.llm_manager = LLMManager(llm_adapter)
 
     async def generate_text_response(self, input_text: str, session_id: str) -> Result:
+        """
+        Gera uma resposta de texto com base na entrada do usuário e no histórico da sessão.
+
+        Args:
+            input_text (str): Texto de entrada do usuário.
+            session_id (str): Identificador da sessão.
+
+        Returns:
+            Result: Objeto contendo sucesso/falha e a resposta gerada.
+        """
         if not input_text or not session_id:
             return Result.fail(error_message='Input inválido.')
 

@@ -13,7 +13,15 @@ BASE_URL = os.getenv('BASE_URL')
 
 @tool
 def get_person_data(cpf: str):
-    """Retorna os dados do cidadão a partir do CPF fornecido."""
+    """
+    Retorna os dados do cidadão a partir do CPF fornecido.
+
+    Args:
+        cpf (str): Número de CPF do cidadão (com ou sem pontuação).
+
+    Returns:
+        dict: Dicionário contendo os dados da pessoa ou mensagem de erro.
+    """
     try:
         cpf_clean = re.sub(r'\D', '', cpf)
 

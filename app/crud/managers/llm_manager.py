@@ -14,7 +14,10 @@ class LLMManager:
 
     def set_adapter(self, llm_adapter: LangChainLLMAdapter):
         """
-        Define o adaptador a ser utilizado.
+        Define o adaptador LLM a ser utilizado.
+
+        Args:
+            llm_adapter (LangChainLLMAdapter): Adaptador LLM a ser configurado.
         """
         self.llm_adapter = llm_adapter
 

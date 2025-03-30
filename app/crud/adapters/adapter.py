@@ -12,7 +12,14 @@ from utils.result import Result
 
 class LangChainLLMAdapter:
     """
-    Adaptador genérico para modelos compatíveis com LangChain (OpenAI, Ollama, VertexAI, etc.).
+    Adaptador genérico para modelos compatíveis com LangChain.
+
+    Esta classe encapsula a lógica de geração de respostas para diferentes
+    modelos de linguagem como OpenAI, Anthropic, VertexAI, etc.
+
+    Attributes:
+        llm: Instância do modelo LangChain configurado.
+        tools: Ferramentas disponíveis para o modelo utilizar.
     """
 
     def __init__(self, llm, tools):
