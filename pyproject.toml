@@ -24,6 +24,7 @@ dependencies = [
     "pymupdf>=1.25.2",
     "langchain-deepseek>=0.1.2",
     "pydantic-settings>=2.8.1",
+    "redis>=5.2.1",
 ]
 
 [tool.ruff]
