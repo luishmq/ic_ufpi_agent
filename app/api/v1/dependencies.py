@@ -104,10 +104,10 @@ def get_llm_adapter(tools: Tools = Depends(get_tools)):
     """
     llm_manager = LLMManager()
     factory_result = llm_manager.create_adapter(
-        model_type='anthropic',
+        model_type='vertexai',
         tools=tools,
-        api_key=settings.anthropic_api_key,
-        model_name='claude-3-5-haiku-20241022',
+        project=settings.project_id,
+        model_name='gemini-2.0-flash',
         temperature=0.5,
     )
     if not factory_result.success:
