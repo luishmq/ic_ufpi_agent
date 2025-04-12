@@ -2,11 +2,12 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request, Response, status, Depends
+import uuid
+from fastapi import APIRouter, Request, Response, status, Depends, HTTPException
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
-from crud.agents.agent190_modeling import Agent190
+from crud.agents.agent190_modeling import Agent190, RedisSessionManager
 from crud.features.audio_transcript import (
     AudioDownloader,
     AudioConverter,
@@ -21,10 +22,43 @@ from api.v1.dependencies import (
     get_agent,
     get_gemini_vision,
     get_cloud_uploader,
+    get_protocol_generator,
+    get_session_manager,
     settings,
 )
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler()]
+)
+
 router = APIRouter()
+
+
+@router.post('/init_session', status_code=status.HTTP_200_OK)
+async def init_session(session_manager: RedisSessionManager = Depends(get_session_manager)):
+    """Rota de inicialização da sessão.
+
+    Cria um novo ID de sessão e testa a conexão com o Redis.
+
+    Args:
+        session_manager (RedisSessionManager): Gerenciador de sessões do Redis.
+
+    Returns:
+        dict: Informações da sessão iniciada.
+
+    Raises:
+        HTTPException: Se não for possível conectar ao Redis.
+    """
+    conn_result = session_manager.test_connection()
+    if not conn_result.success:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Erro ao conectar ao serviço de armazenamento de sessões: {conn_result.error_message}',
+        )
+
+    session_id = str(uuid.uuid4())
+    return {'session_id': session_id}
 
 
 async def send_twilio_message(to_number: str, body_text: str, client: Client = Depends(get_twilio_client)):
@@ -39,11 +73,17 @@ async def send_twilio_message(to_number: str, body_text: str, client: Client = D
     try:
         client.messages.create(body=body_text, from_=settings.twilio_whatsapp_number, to=to_number)
     except Exception as e:
-        logging.exception(f'Falha ao enviar mensagem Twilio: {e}')
+        logger.exception(f'Falha ao enviar mensagem Twilio: {e}')
 
 
 async def process_audio_in_background(
-    ogg_path: str, from_number: str, session_id: str, send_message_func, agent: Agent190, cloud_uploader: CloudUploader
+    ogg_path: str,
+    from_number: str,
+    session_id: str,
+    send_message_func,
+    agent: Agent190,
+    cloud_uploader: CloudUploader,
+    protocol_generator=None,
 ):
     """
     Processa o áudio de forma assíncrona.
@@ -55,6 +95,7 @@ async def process_audio_in_background(
         send_message_func: Função para enviar mensagens de resposta.
         agent (Agent190): Instância do agente para processar o texto transcrito.
         cloud_uploader (CloudUploader): Uploader para armazenar o arquivo na nuvem.
+        protocol_generator: Gerador de protocolos para verificar fim de atendimento.
     """
     try:
         convert_result = await AudioConverter.convert_ogg_to_wav(ogg_path)
@@ -81,12 +122,21 @@ async def process_audio_in_background(
             await send_message_func(from_number, agent_result.error_message)
             return
 
-        final_text = agent_result.data
+        ai_response = agent_result.data
+        final_text = ai_response
+        protocol_number = None
+
+        if protocol_generator:
+            protocol_result = await protocol_generator.process_response(ai_response, session_id)
+            if protocol_result.success:
+                final_text, protocol_number = protocol_result.data
+                if protocol_number:
+                    logger.info(f'Protocolo gerado para sessão {session_id}: {protocol_number}')
 
         await send_message_func(from_number, final_text)
 
     except Exception as e:
-        logging.exception(f'Erro ao processar áudio: {e}')
+        logger.exception(f'Erro ao processar áudio: {e}')
         await send_message_func(from_number, f'Erro ao processar áudio: {str(e)}')
 
 
@@ -98,6 +148,7 @@ async def predict_twilio_190(
     agent: Agent190 = Depends(get_agent),
     gemini_vision: GeminiVision = Depends(get_gemini_vision),
     cloud_uploader: CloudUploader = Depends(get_cloud_uploader),
+    protocol_generator=Depends(get_protocol_generator),
 ):
     """
     Endpoint que recebe e processa mensagens do WhatsApp via Twilio.
@@ -159,7 +210,16 @@ async def predict_twilio_190(
             }
             return Response(content=str(resp), media_type='application/xml')
 
-        agent_response = agent_result.data
+        ai_response = agent_result.data
+        agent_response = ai_response
+        protocol_number = None
+
+        protocol_result = await protocol_generator.process_response(ai_response, session_id)
+        if protocol_result.success:
+            agent_response, protocol_number = protocol_result.data
+            if protocol_number:
+                logger.info(f'Protocolo gerado para sessão {session_id}: {protocol_number}')
+
         msg.body(agent_response)
 
         request.state.bq_data = {
@@ -167,6 +227,7 @@ async def predict_twilio_190(
             'user_input': user_input,
             'response': agent_response,
             'message_type': message_type,
+            'protocol': protocol_number,
         }
         return Response(content=str(resp), media_type='application/xml')
 
@@ -195,6 +256,7 @@ async def predict_twilio_190(
                     send_message_func=lambda to, text: send_twilio_message(to, text, twilio_client),
                     agent=agent,
                     cloud_uploader=cloud_uploader,
+                    protocol_generator=protocol_generator,
                 )
             )
 
@@ -246,13 +308,23 @@ async def predict_twilio_190(
                 }
                 return Response(content=str(resp), media_type='application/xml')
 
-            agent_response = agent_result.data
+            ai_response = agent_result.data
+            agent_response = ai_response
+            protocol_number = None
+
+            protocol_result = await protocol_generator.process_response(ai_response, session_id)
+            if protocol_result.success:
+                agent_response, protocol_number = protocol_result.data
+                if protocol_number:
+                    logger.info(f'Protocolo gerado para sessão {session_id}: {protocol_number}')
+
             msg.body(agent_response)
             request.state.bq_data = {
                 'session_id': session_id,
                 'user_input': user_input,
                 'response': agent_response,
                 'message_type': message_type,
+                'protocol': protocol_number,
             }
             return Response(content=str(resp), media_type='application/xml')
 
@@ -282,12 +354,22 @@ async def predict_twilio_190(
             }
             return Response(content=str(resp), media_type='application/xml')
 
-        agent_response = agent_result.data
+        ai_response = agent_result.data
+        agent_response = ai_response
+        protocol_number = None
+
+        protocol_result = await protocol_generator.process_response(ai_response, session_id)
+        if protocol_result.success:
+            agent_response, protocol_number = protocol_result.data
+            if protocol_number:
+                logger.info(f'Protocolo gerado para sessão {session_id}: {protocol_number}')
+
         msg.body(agent_response)
         request.state.bq_data = {
             'session_id': session_id,
             'user_input': user_input,
             'response': agent_response,
             'message_type': message_type,
+            'protocol': protocol_number,
         }
         return Response(content=str(resp), media_type='application/xml')
