@@ -6,6 +6,8 @@ import logging
 from langchain_openai import ChatOpenAI
 from utils.result import Result
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler()])
+logger = logging.getLogger(__name__)
 
 class ProtocolDetector:
     """
@@ -66,7 +68,7 @@ class ProtocolDetector:
             return Result.ok(data=is_end)
 
         except Exception as e:
-            logging.error(f'Erro na detecção de fim de atendimento: {str(e)}')
+            logger.error(f'Erro na detecção de fim de atendimento: {str(e)}')
             return Result.fail(error_message=f'Erro na detecção: {str(e)}')
 
 
@@ -136,5 +138,5 @@ class ProtocolGenerator:
             return Result.ok(data=(final_message, protocol_number))
 
         except Exception as e:
-            logging.error(f'Erro ao processar protocolo: {str(e)}')
+            logger.error(f'Erro ao processar protocolo: {str(e)}')
             return Result.fail(error_message=f'Erro ao processar protocolo: {str(e)}')
