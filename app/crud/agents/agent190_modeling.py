@@ -1,3 +1,6 @@
+import redis
+import json
+
 from datetime import date
 from langchain_core.messages import HumanMessage, AIMessage
 from utils.prompts import PROMPT_190
@@ -6,53 +9,114 @@ from crud.adapters.adapter import LangChainLLMAdapter
 from crud.managers.llm_manager import LLMManager
 
 
-class SessionManager:
+class RedisSessionManager:
     """
-    Classe responsável pelo gerenciamento do histórico de sessões.
+    Gerenciador de sessões utilizando Redis como armazenamento.
+
+    Esta classe fornece métodos para persistir e recuperar históricos de conversas
+    entre sessões, utilizando o Redis como backend de armazenamento.
 
     Attributes:
-        store (dict): Dicionário para armazenar os históricos das sessões.
+        client (redis.Redis): Cliente Redis para interação com o servidor.
+        key_prefix (str): Prefixo utilizado nas chaves Redis para organização.
+        expiry_seconds (int): Tempo de expiração em segundos para as sessões.
     """
 
-    def __init__(self):
-        self.store = {}
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        password: str,
+        ssl: bool = True,
+        key_prefix: str = 'session_history:',
+        expiry_seconds: int = 86400,
+    ):
+        """
+        Inicializa o gerenciador de sessões Redis.
+
+        Args:
+            host (str): Endereço do servidor Redis.
+            port (int): Porta do servidor Redis.
+            password (str): Senha para autenticação no Redis.
+            ssl (bool, opcional): Se deve usar SSL na conexão. Padrão é True.
+            key_prefix (str, opcional): Prefixo para as chaves no Redis. Padrão é 'session_history:'.
+            expiry_seconds (int, opcional): Tempo de vida dos dados em segundos. Padrão é 86400 (24 horas).
+        """
+        self.client = redis.Redis(host=host, port=port, password=password, ssl=ssl)
+        self.key_prefix = key_prefix
+        self.expiry_seconds = expiry_seconds
+
+    def test_connection(self) -> Result:
+        """
+        Testa a conexão com o servidor Redis.
+
+        Returns:
+            Result: Objeto indicando sucesso ou falha na conexão.
+        """
+        try:
+            self.client.ping()
+            return Result.ok()
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao conectar ao Redis: {str(e)}')
 
     def get_session_history(self, session_id: str) -> Result:
         """
-        Retorna o histórico de uma sessão ou cria uma nova sessão se não existir.
+        Recupera o histórico de uma sessão pelo ID.
 
         Args:
-            session_id (str): ID da sessão.
+            session_id (str): Identificador único da sessão.
 
         Returns:
-            Result: Objeto Result contendo sucesso e o histórico da sessão.
+            Result: Objeto contendo o histórico da sessão ou erro.
         """
-        if session_id not in self.store:
-            self.store[session_id] = []
-        return Result.ok(data=self.store[session_id])
+        if not session_id:
+            return Result.fail(error_message='ID de sessão inválido')
+
+        key = f'{self.key_prefix}{session_id}'
+        try:
+            data = self.client.get(key)
+            if data is None:
+                history = []
+            else:
+                history = json.loads(data)
+            return Result.ok(data=history)
+        except json.JSONDecodeError as e:
+            return Result.fail(error_message=f'Erro ao decodificar histórico: {str(e)}')
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao recuperar histórico: {str(e)}')
 
     def update_session_history(self, session_id: str, message) -> Result:
         """
-        Atualiza o histórico da sessão com uma nova mensagem.
+        Atualiza o histórico de uma sessão adicionando uma nova mensagem.
 
         Args:
-            session_id (str): ID da sessão.
-            message: Mensagem a ser adicionada.
+            session_id (str): Identificador único da sessão.
+            message: A mensagem a ser adicionada ao histórico.
 
         Returns:
-            Result: Objeto Result indicando sucesso ou erro.
+            Result: Objeto indicando sucesso ou falha na operação.
         """
+        if not session_id:
+            return Result.fail(error_message='ID de sessão inválido')
+
+        key = f'{self.key_prefix}{session_id}'
         history_result = self.get_session_history(session_id)
         if not history_result.success:
             return Result.fail(error_message='Erro ao obter histórico da sessão')
 
         history = history_result.data
-        history.append(message)
-        return Result.ok()
+        message_data = message.dict() if hasattr(message, 'dict') else str(message)
+        history.append(message_data)
+
+        try:
+            self.client.set(key, json.dumps(history), ex=self.expiry_seconds)
+            return Result.ok()
+        except Exception as e:
+            return Result.fail(error_message=f'Erro ao atualizar histórico: {str(e)}')
 
 
 class Agent190:
-    def __init__(self, session_manager: SessionManager, llm_adapter: LangChainLLMAdapter):
+    def __init__(self, session_manager: RedisSessionManager, llm_adapter: LangChainLLMAdapter):
         """
         Inicializa uma instância do agente de atendimento 190.
 
