@@ -16,6 +16,8 @@ bq_storage = BigQueryStorage()
 
 app = FastAPI(
     title='API ChatBot Gen AI - SSP',
+    description='API para o ChatBot Gen AI - SSP',
+    version='1.0.0',
     openapi_url='/api/v1/openapi.json',
     openapi_tags=[
         {'name': 'Healthcheck', 'description': 'Healthcheck Endpoint'},
