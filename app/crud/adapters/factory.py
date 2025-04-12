@@ -29,7 +29,7 @@ class LLMFactory:
         try:
             if model_type.lower() == 'openai':
                 model_name = config.get('model_name', 'gpt-4o-mini')
-                temperature = config.get('temperature', 0.2)
+                temperature = config.get('temperature', 0.5)
                 api_key = config.get('api_key')
 
                 llm = ChatOpenAI(model=model_name, temperature=temperature, api_key=api_key)
@@ -38,7 +38,7 @@ class LLMFactory:
 
             elif model_type.lower() == 'anthropic':
                 model_name = config.get('model_name', 'claude-3-5-haiku-20241022')
-                temperature = config.get('temperature', 0.2)
+                temperature = config.get('temperature', 0.5)
                 api_key = config.get('api_key')
 
                 llm = ChatAnthropic(model=model_name, temperature=temperature, api_key=api_key)
@@ -47,15 +47,15 @@ class LLMFactory:
 
             elif model_type.lower() == 'ollama':
                 model_name = config.get('model_name', 'llama3.1')
-                temperature = config.get('temperature', 0.2)
+                temperature = config.get('temperature', 0.5)
 
                 llm = ChatOllama(model=model_name, temperature=temperature)
                 adapter = LangChainLLMAdapter(llm=llm, tools=tools)
                 return Result.ok(data=adapter)
 
             elif model_type.lower() == 'vertexai':
-                model_name = config.get('model_name', 'gemini-1.5-pro')
-                temperature = config.get('temperature', 0.2)
+                model_name = config.get('model_name', 'gemini-2.0-flash')
+                temperature = config.get('temperature', 0.5)
                 project = config.get('project')
 
                 llm = ChatVertexAI(model=model_name, temperature=temperature, project=project)
@@ -63,7 +63,7 @@ class LLMFactory:
                 return Result.ok(data=adapter)
             elif model_type.lower() == 'deepseek':
                 model_name = config.get('model_name', 'deepseek-chat')
-                temperature = config.get('temperature', 0.2)
+                temperature = config.get('temperature', 0.5)
                 api_key = config.get('api_key')
 
                 llm = ChatDeepSeek(model=model_name, temperature=temperature, api_key=api_key)
