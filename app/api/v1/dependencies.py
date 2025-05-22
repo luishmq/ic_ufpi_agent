@@ -6,7 +6,6 @@ from twilio.rest import Client
 from crud.agents.agent190_modeling import Agent190, RedisSessionManager
 from crud.features.audio_transcript import CloudUploader
 from crud.features.gemini_vision import GeminiVision
-from crud.features.protocol_generator import ProtocolDetector, ProtocolGenerator
 from crud.managers.llm_manager import LLMManager
 from crud.tools.tools import Tools
 
@@ -23,6 +22,7 @@ class Settings(BaseSettings):
     account_sid: str
     twilio_auth_token: str
     openai_api_key: str
+    maritalk_api_key: str
     anthropic_api_key: str
     deepseek_api_key: str
     xai_api_key: str
@@ -104,11 +104,12 @@ def get_llm_adapter(tools: Tools = Depends(get_tools)):
     """
     llm_manager = LLMManager()
     factory_result = llm_manager.create_adapter(
-        model_type='vertexai',
+        model_type='openai',
         tools=tools,
-        project=settings.project_id,
-        model_name='gemini-2.0-flash',
-        temperature=0.5,
+        # project=settings.project_id,
+        model_name='gpt-4o',
+        temperature=0.7,
+        api_key=settings.openai_api_key,
     )
     if not factory_result.success:
         raise Exception(f'Erro ao criar adaptador LLM: {factory_result.error_message}')
@@ -149,26 +150,3 @@ def get_gemini_vision() -> GeminiVision:
         GeminiVision: Instância do serviço Gemini Vision inicializada.
     """
     return GeminiVision()
-
-
-def get_protocol_detector() -> ProtocolDetector:
-    """
-    Cria e retorna um detector de fim de atendimento.
-
-    Returns:
-        ProtocolDetector: Instância do detector configurada.
-    """
-    return ProtocolDetector(api_key=settings.openai_api_key)
-
-
-def get_protocol_generator(protocol_detector: ProtocolDetector = Depends(get_protocol_detector)) -> ProtocolGenerator:
-    """
-    Cria e retorna um gerador de protocolos de atendimento.
-
-    Args:
-        protocol_detector (ProtocolDetector): Detector de finalização de atendimento.
-
-    Returns:
-        ProtocolGenerator: Instância do gerador de protocolos configurada.
-    """
-    return ProtocolGenerator(protocol_detector=protocol_detector)
